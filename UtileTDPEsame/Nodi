@@ -1,0 +1,154 @@
+============================================================
+01_NODI.txt — FORMULARIO ESAME TECNICHE DI PROGRAMMAZIONE
+============================================================
+OBIETTIVO: individuare, estrarre e inserire i vertici del grafo.
+Adatta sempre nomi di tabelle, colonne e attributi alla traccia.
+
+1) LEGGERE LA CONSEGNA
+---------------------
+Individua:
+- COSA rappresenta un nodo (artista, cliente, prodotto, ecc.).
+- QUALI nodi includere (tutti? solo con almeno un brano? solo in un anno?).
+- QUALI filtri applicare (date, categoria, genere, soglie).
+- Se il filtro vale sui NODI oppure solo sugli ARCHI.
+  ATTENZIONE: un nodo senza archi può dover restare nel grafo!
+
+2) CLASSE DEL NODO (ESEMPIO: ARTIST)
+-----------------------------------
+# model/artist.py — esempio, non copiare se lo scheletro fornisce già la classe.
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Artist:
+    ArtistId: int
+    Name: str
+
+# Con frozen=True, gli attributi identificativi non si modificano.
+# Se la traccia richiede attributi aggiuntivi mutabili (es. Tracks),
+# verifica come è definita la classe fornita dal professore.
+# Per usare oggetti come nodi NetworkX devono essere hashable.
+
+3) DAO: TUTTI I NODI (QUERY BASE)
+--------------------------------
+# database/DAO.py
+from database.DB_connect import DBConnect
+from model.artist import Artist
+
+class DAO:
+    @staticmethod
+    def getAllArtists():
+        conn = DBConnect.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        query = """
+            SELECT DISTINCT a.ArtistId, a.Name
+            FROM Artist a
+            JOIN Album al ON a.ArtistId = al.ArtistId
+            JOIN Track t ON al.AlbumId = t.AlbumId
+            ORDER BY a.Name
+        """
+        cursor.execute(query)
+        result = [Artist(**row) for row in cursor]
+        cursor.close()
+        conn.close()
+        return result
+
+# Questa query seleziona SOLO artisti con almeno un brano.
+# Se servono tutti gli artisti, non fare JOIN che escludono quelli senza brani.
+
+4) DAO: NODI CON FILTRO
+-----------------------
+# Esempio di filtro parametrizzato: categoria / anno / ID.
+query = """
+    SELECT DISTINCT p.ProductId, p.Name
+    FROM Product p
+    WHERE p.CategoryId = %s
+"""
+cursor.execute(query, (category_id,))
+
+# Un parametro: (valore,) con virgola.
+# Più parametri: (valore1, valore2).
+# Mai inserire valori utente direttamente nella stringa SQL.
+
+5) MODEL: CARICARE I NODI
+-------------------------
+import networkx as nx
+from database.DAO import DAO
+
+class Model:
+    def __init__(self):
+        self._graph = nx.Graph()       # oppure nx.DiGraph()
+        self._nodes = []
+        self._idMap = {}
+
+    def buildGraph(self):
+        self._graph.clear()            # evita duplicati tra costruzioni
+        self._nodes = DAO.getAllArtists()
+        self._graph.add_nodes_from(self._nodes)
+        self._idMap = {a.ArtistId: a for a in self._nodes}
+        # QUI si aggiungono gli archi (vedi 02_ARCHI.txt)
+
+    def getNumNodes(self):
+        return self._graph.number_of_nodes()
+
+    def getArtists(self):
+        return list(self._graph.nodes)
+
+6) MAPPA ID -> OGGETTO
+----------------------
+self._idMap = {a.ArtistId: a for a in self._nodes}
+
+# Se il DAO degli archi restituisce ArtistId, recupera l'oggetto:
+artist = self._idMap[artist_id]
+
+# Evita KeyError: verifica che gli ID degli archi siano inclusi
+# nell'insieme di nodi, oppure usa self._idMap.get(artist_id).
+
+7) NODI CON ATTRIBUTI AGGIUNTIVI
+--------------------------------
+# Caso giugno 2026 C: il punteggio della ricorsione dipende
+# dal numero di brani per artista. La soluzione del professore
+# popola artist.Tracks nel DAO.
+
+@staticmethod
+def getTracksForArtist(artistId):
+    conn = DBConnect.get_connection()
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT t.TrackId
+        FROM Track t
+        JOIN Album al ON t.AlbumId = al.AlbumId
+        WHERE al.ArtistId = %s
+    """
+    cursor.execute(query, (artistId,))
+    result = [row['TrackId'] for row in cursor]
+    cursor.close()
+    conn.close()
+    return result
+
+# Nel DAO, dopo aver creato gli oggetti Artist:
+# for artist in result:
+#     artist.Tracks = DAO.getTracksForArtist(artist.ArtistId)
+# Questo richiede una classe Artist che consenta l'assegnazione
+# dell'attributo Tracks. Non funziona con @dataclass(frozen=True)
+# senza una diversa progettazione.
+
+# ALTERNATIVA PIÙ EFFICIENTE: recuperare il conteggio in una query
+# e usare una mappa {ArtistId: numero_brani}, se la traccia lo consente.
+
+8) CONTROLLER: POPOLARE UN DROPDOWN DI NODI
+-------------------------------------------
+# Flet 0.22.x, esempio adattabile alla View dell'esame.
+def fillDDArtist(self):
+    self._view._ddArtist.options.clear()
+    for artist in self._model.getArtists():
+        self._view._ddArtist.options.append(
+            ft.dropdown.Option(key=str(artist.ArtistId), text=artist.Name)
+        )
+    self._view.update_page()
+
+# Ordine corretto: PRIMA buildGraph(), POI fillDDArtist().
+# Il valore selezionato è una STRINGA: convertire in int per la mappa.
+# artist = self._model.getArtistById(int(self._view._ddArtist.value))
+
+
+

@@ -1,0 +1,329 @@
+# TIPI DI GRAFO - NETWORKX
+# GRAFO NON ORIENTATO / NON DIRETTO
+# Sono sinonimi: i collegamenti non hanno una direzione
+self._graph = nx.Graph()
+
+# GRAFO ORIENTATO / DIRETTO
+# Sono sinonimi: i collegamenti hanno una direzione
+self._graph = nx.DiGraph()
+
+# GRAFO PESATO
+# Può essere sia orientato sia non orientato.
+self._graph.add_edge(u, v, weight=peso)
+
+# GRAFO NON PESATO
+self._graph.add_edge(u, v)
+
+# GRAFO SEMPLICE
+# Non ammette archi multipli tra gli stessi nodi né autoarchi.
+# nx.Graph() non crea archi multipli, ma gli autoarchi
+# devono essere evitati esplicitamente nel codice.
+
+PRIMA PARTE: NODI
+1) Definisci file per il vertice -> in questo caso Artist
+from dataclasses import dataclass, field
+@dataclass
+class Artist:
+    ArtistId: int
+    Name: str
+    tracks: list = field(default_factory=list)
+    playlists: set = field(default_factory=set)
+
+    def __hash__(self):
+        return hash(self.ArtistId)
+
+    def __eq__(self, other):
+        if not isinstance(other, Artist):
+            return NotImplemented
+        return self.ArtistId == other.ArtistId
+
+    def __str__(self):
+        return f"{self.Name}"
+
+2)  DAO.py: metodo per tutti gli artisti
+from database.DB_connect import DBConnect
+from model.artist import Artist
+
+class DAO:
+    @staticmethod
+    def getAllArtists():
+        conn = DBConnect.get_connection()
+        result = []
+        cursor = conn.cursor(dictionary=True)
+        query = """
+            SELECT DISTINCT a.ArtistId, a.Name
+            FROM Artist a
+            JOIN Album a2 ON a.ArtistId = a2.ArtistId
+            JOIN Track t ON a2.AlbumId = t.AlbumId
+        """
+
+        cursor.execute(query)
+        for row in cursor:
+            result.append(Artist(**row))
+
+        cursor.close()
+        conn.close()
+        return result
+
+3) model.py
+import copy
+from dataclasses import dataclass
+import itertools
+import networkx as nx
+from database.DAO import DAO
+from collections import defaultdict
+
+class Model:
+
+    def __init__(self):
+        self._graph = nx.Graph()
+        self._nodes = []
+        self._idMapAO = {}
+
+    def buildGraph(self):
+        self._graph.clear()
+        #qui metti quella del DAO che hai definito
+        self._nodes = DAO.getAllArtists()
+        self._graph.add_nodes_from(self._nodes)
+        self._idMapAO = {}
+        for n in self._nodes:
+            self._idMapAO[n.ArtistId] = n
+
+#Elemento legato al vertice "almeno un brano"
+    def getTracks(self):
+        return DAO.getAllTracks()
+
+#Elemento vertici
+    def getArtists(self):
+        return self._graph.nodes()
+
+#FISSI: Numero nodi e numero archi
+    def getNumNodes(self):
+        return len(self._graph.nodes)
+
+    def getNumEdges(self):
+        return len(self._graph.edges)
+
+4) testmodel.py
+from model.model import Model
+
+model = Model()
+model.buildGraph()
+
+print("Numero nodi:", model.getNumNodes())
+print("Numero archi:", model.getNumEdges())
+
+
+PARTE 2: ARCHI
+1. getEdgePeso(v1, v2) — Peso di UNA coppia
+Quando usarlo: quando vuoi calcolare il peso dell’arco tra due nodi specifici.
+
+# DAO.py
+@staticmethod
+def getEdgePeso(v1, v2):
+    conn = DBConnect.get_connection()
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT COUNT(DISTINCT ...) AS peso
+        FROM ...
+        JOIN ...
+        WHERE nodo1 = %s
+          AND nodo2 = %s
+    """
+
+    cursor.execute(query, (v1.ArtistId, v2.ArtistId))
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return row["peso"]
+
+#model.py
+for v1, v2 in itertools.combinations(self._nodes, 2):
+
+    peso = DAO.getEdgePeso(v1, v2)
+    if peso > 0:
+        self._graph.add_edge(v1, v2, weight=peso)
+
+2. getAllEdges() — TUTTI gli archi con i pesi
+Quando usarlo: quando vuoi recuperare direttamente dal database tutte le coppie di nodi da collegare, con il relativo peso
+
+# DAO.py
+@staticmethod
+def getAllEdges():
+    conn = DBConnect.get_connection()
+    result = []
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT nodo1 AS v1,
+               nodo2 AS v2,
+               COUNT(DISTINCT ...) AS peso
+        FROM ...
+        JOIN ...
+        WHERE ...
+        GROUP BY nodo1, nodo2
+    """
+
+    cursor.execute(query)
+    for row in cursor:
+        result.append(row)
+    cursor.close()
+    conn.close()
+    return result
+
+#model.py
+edges = DAO.getAllEdges()
+
+for edge in edges:
+    v1 = self._idMapAO[edge["v1"]]
+    v2 = self._idMapAO[edge["v2"]]
+    peso = edge["peso"]
+    self._graph.add_edge(v1, v2, weight=peso)
+
+
+BUILDGRAPH NEL MODEL CON NODI E ARCHI
+def buildGraph(self):
+    # Pulisco il grafo prima di ricostruirlo
+    self._graph.clear()
+
+    # ____________________ NODI ____________________
+
+    # Recupero dal DAO tutti gli artisti che hanno almeno un brano
+    self._nodes = DAO.getAllArtists()
+
+    # Aggiungo gli artisti come nodi del grafo
+    self._graph.add_nodes_from(self._nodes)
+
+    # Creo un dizionario che associa ArtistId all'oggetto Artist
+    self._idMapAO = {}
+
+    for n in self._nodes:
+        self._idMapAO[n.ArtistId] = n
+
+    # ____________________ ARCHI ____________________
+
+    # Recupero dal DAO tutte le coppie di artisti
+    # che condividono almeno una playlist, con il relativo peso
+    edges = DAO.getAllEdges()
+
+    # Scorro tutte le coppie restituite dal DAO
+    for edge in edges:
+
+        # Recupero l'oggetto Artist del primo artista
+        # utilizzando il suo ID e il dizionario _idMapAO
+        v1 = self._idMapAO[edge["Artist1"]]
+
+        # Recupero l'oggetto Artist del secondo artista
+        v2 = self._idMapAO[edge["Artist2"]]
+
+        # Recupero il peso dell'arco
+        # cioè il numero di playlist distinte condivise
+        peso = edge["peso"]
+
+        # Aggiungo al grafo l'arco tra i due artisti
+        # assegnandogli il peso calcolato
+        self._graph.add_edge(v1, v2, weight=peso)
+
+
+# ============================================================
+# CONTROLLER - CREAZIONE GRAFO E STAMPA INFORMAZIONI
+# ============================================================
+
+# IMPORTANTE:
+# - DAO: recupera i dati dal database
+# - MODEL: costruisce il grafo ed esegue i calcoli
+# - CONTROLLER: richiama i metodi del Model e stampa nella View
+# - TESTMODEL: serve solo per verificare che il Model funzioni
+
+
+# ============================================================
+# 1. HANDLE CREAZIONE GRAFO
+# ============================================================
+def handleCreaGrafo(self, e):
+    # Se la consegna prevede una selezione da tendina,
+    # recuperare prima il valore selezionato.
+    # Altrimenti chiamare direttamente buildGraph().
+
+    self._model.buildGraph()
+    # Pulisco i risultati precedenti
+    self._view.txt_result.controls.clear()
+
+    # Stampo numero di nodi e archi
+    self._view.txt_result.controls.append(
+        ft.Text(f"Numero nodi: {self._model.getNumNodes()}")
+    )
+
+    self._view.txt_result.controls.append(
+        ft.Text(f"Numero archi: {self._model.getNumEdges()}")
+    )
+
+    # Aggiorno la View
+    self._view.update_page()
+
+# ============================================================
+# 2. HANDLE STAMPA INFO
+# ============================================================
+
+def handleStampaInfo(self, e):
+    # Pulisco i risultati precedenti
+    self._view.txt_result.controls.clear()
+
+    # -------- ARTISTA CON GRADO MASSIMO --------
+
+    # Il Model restituisce artista e grado
+    artist, degree = self._model.getMaxDegreeArtist()
+
+    self._view.txt_result.controls.append(
+        ft.Text(f"Grado massimo: {artist.Name} - {degree}")
+    )
+
+    # -------- ARTISTA CON SOMMA PESI MASSIMA --------
+
+    # Il Model restituisce artista e somma dei pesi
+    artist, score = self._model.getBestArtist()
+
+    self._view.txt_result.controls.append(
+        ft.Text(f"Somma pesi massima: {artist.Name} - {score}")
+    )
+
+    # -------- TOP 10 ARCHI --------
+
+    # Recupero la lista degli archi ordinati dal Model
+    topEdges = self._model.getTop10Edges()
+
+    self._view.txt_result.controls.append(
+        ft.Text("TOP 10 ARCHI:")
+    )
+
+    # Ogni arco contiene: nodo1, nodo2, dizionario attributi
+    for u, v, data in topEdges:
+
+        self._view.txt_result.controls.append(
+            ft.Text(f"{u.Name} - {v.Name}: {data['weight']}")
+        )
+
+    # Aggiorno la View
+    self._view.update_page()
+
+#RICORSIONE NELL'HANDLE
+    def handleRicorsione(self,e):
+        pass
+        # 1. Leggo i parametri dalla VIEW
+        valore = self._view.dd_nodo.value
+        # 2. Controllo che siano validi
+        if valore is None:
+            self._view.txt_result.controls.clear()
+            self._view.txt_result.controls.append(
+                ft.Text("Selezionare un nodo")
+            )
+            self._view.update_page()
+            return
+
+        # 3. Chiamo la ricorsione nel MODEL
+        risultato = self._model.getBestPath(valore)
+        # 4. Stampo il risultato
+        self._view.txt_result.controls.clear()
+        for nodo in risultato:
+            self._view.txt_result.controls.append(
+                ft.Text(str(nodo))
+            )
+        self._view.update_page()

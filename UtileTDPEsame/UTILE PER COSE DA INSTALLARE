@@ -1,0 +1,14 @@
+FLET (metti quello nella consegna)
+NEL TERMINALE DI PYCHARM
+pip install flet==0.24.1
+Se non funziona:
+python -m pip install flet==0.24.1
+
+NETWORKKX
+pip install "networkx~=3.2.1"
+MYSQL
+pip install "mysql-connector-python~=8.3.0"
+
+X VEDERE SE SONO INSTALLATI:
+pip show networkx
+pip show mysql-connector-python

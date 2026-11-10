@@ -1,0 +1,172 @@
+METODO B — getEdgePeso(u, v)
+Quando utilizzarlo?
+Quando vuoi verificare il collegamento e calcolare il peso per una coppia di nodi alla volta
+
+1) DAO.py
+@staticmethod
+def getEdgePeso(u, v):
+    conn = DBConnect.get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    query = """
+        SELECT
+
+            -- MODIFICARE: ELEMENTI DA CONTARE
+            COUNT(DISTINCT elemento.Id) AS peso
+
+        FROM ...
+
+        -- MODIFICARE: JOIN
+        JOIN ...
+
+        WHERE ...
+
+        -- MODIFICARE: ID DEI DUE NODI
+        AND n1.Id = %s
+        AND n2.Id = %s
+    """
+
+    # MODIFICARE: ATTRIBUTI ID
+    cursor.execute(
+        query,
+        (u.ArtistId, v.ArtistId)
+    )
+
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+   return row["peso"] if row is not None else 0
+
+2) MODEL — Pesato
+import itertools
+for u, v in itertools.combinations(self._nodes, 2):
+
+    # MODIFICARE: metodo DAO
+    peso = DAO.getEdgePeso(u, v)
+
+    # Se condividono almeno un elemento
+    if peso > 0:
+        self._graph.add_edge(u, v, weight=peso)
+
+3)MODEL — Non pesato
+for u, v in itertools.combinations(self._nodes, 2):
+    peso = DAO.getEdgePeso(u, v)
+
+    if peso > 0:
+        self._graph.add_edge(u, v)
+
+METODO C — CONFRONTO DI INSIEMI IN PYTHON (esempio: artisti che condividono playlist).
+Quando utilizzarlo?
+Quando ogni nodo possiede già un insieme di elementi associati
+Esempio: ogni artista possiede un insieme di playlist.
+
+1)Recupero gli elementi associati
+# MODIFICARE: metodo DAO
+artistPlaylists = DAO.getArtistPlaylistPairs()
+
+for artist in self._nodes:
+    # MODIFICARE: ID E ATTRIBUTO
+    artist.Playlists = set(
+        artistPlaylists.get(artist.ArtistId, set())
+    )
+
+2) MODEL — Costruzione archi
+lo scrivi appena dopo: self._idMapAO = {a.id: a for a in self._nodes}
+import itertools
+for u, v in itertools.combinations(self._nodes, 2):
+
+    # MODIFICARE: INSIEMI DA CONFRONTARE
+    comuni = u.Playlists & v.Playlists
+
+    # Se esistono elementi comuni
+    if comuni:
+        # MODIFICARE: CALCOLO PESO
+        peso = len(comuni)
+        self._graph.add_edge(u, v, weight=peso)
+        #se non è pesato: self._graph.add_edge(u, v)
+
+METODO D — ARCHI DA GRUPPI CONDIVISI
+Quando utilizzarlo?
+Quando il DAO restituisce associazioni tra nodi e gruppi.
+
+Esempi:
+* Artisti presenti nella stessa playlist.
+* Clienti che acquistano dallo stesso artista.
+* Album che condividono un genere.
+
+1) DAO — Risultato atteso
+Il DAO deve restituire coppie
+
+2)MODEL
+from collections import defaultdict
+from itertools import combinations
+
+# Dizionario: gruppo → insieme di nodi
+gruppi = defaultdict(set)
+
+# MODIFICARE: metodo DAO
+for group_id, node_id in DAO.getMemberships():
+    gruppi[group_id].add(node_id)
+
+# Conteggio gruppi condivisi
+pesi = defaultdict(int)
+
+for membri in gruppi.values():
+    for id1, id2 in combinations(sorted(membri), 2):
+        pesi[(id1, id2)] += 1
+
+
+# Costruzione archi
+for (id1, id2), peso in pesi.items():
+
+    if id1 not in self._idMapAO or id2 not in self._idMapAO:
+        continue
+
+    u = self._idMapAO[id1]
+    v = self._idMapAO[id2]
+
+    # GRAFO PESATO
+    self._graph.add_edge(u, v, weight=peso)
+
+    # GRAFO NON PESATO:
+    # self._graph.add_edge(u, v)
+
+
+METODO E — CONFRONTO DIRETTO ATTRIBUTI
+È il metodo che abbiamo utilizzato in:
+* Luglio 2024 – A: stesso Stato + ordine temporale.
+* Luglio 2024 – B: stessa forma + distanza inferiore a 100 km
+
+QUANDO UTILIZZARLO?
+Quando gli archi dipendono da attributi già presenti negli oggetti dei nodi.
+Non serve una nuova query SQL per gli archi.
+
+1) MODEL — GRAFO NON ORIENTATO (luglio24B)
+import itertools
+
+# Confronto tutte le coppie di nodi
+for u, v in itertools.combinations(self._nodes, 2):
+
+    # MODIFICARE: condizione della traccia
+    if u.attributo == v.attributo:
+        self._graph.add_edge(u, v)
+
+2) MODEL — GRAFO ORIENTATO (luglio24A)
+import itertools
+
+for u, v in itertools.combinations(self._nodes, 2):
+    # MODIFICARE: condizione della traccia
+    if u.attributo == v.attributo:
+        # MODIFICARE: direzione
+        if u.Data < v.Data:
+            self._graph.add_edge(u, v)
+
+        elif v.Data < u.Data:
+            self._graph.add_edge(v, u)
+
+3) MODEL — GRAFO PESATO
+for u, v in itertools.combinations(self._nodes, 2):
+    if u.attributo == v.attributo:
+        # MODIFICARE: formula del peso
+        peso = abs(u.Valore - v.Valore)
+        self._graph.add_edge(u, v, weight=peso)

@@ -1,0 +1,137 @@
+=====================================================
+ATTENZIONE — LUGLIO 2024 A e B
+=====================================================
+Quando la traccia richiede di confrontare attributi già presenti negli oggetti dei nodi, NON serve
+necessariamente una query SQL per gli archi.
+# Si può utilizzare:
+ARCHI PARTICOLARI — CONFRONTO DIRETTO ATTRIBUTI (altro file, METODO E)
+
+ESEMPI:
+# Luglio A: stesso Stato + ordine temporale.
+# Luglio B: stessa forma + distanza inferiore a 100 km.
+
+METODO A — getAllEdges()
+METODO PRINCIPALE: PROVALO PER PRIMO
+Da utilizzare quando le coppie di nodi devono essere individuate attraverso JOIN
+o condizioni SQL, soprattutto se servono informazioni non già presenti nei nodi
+
+1) DAO.py — Struttura generale
+
+@staticmethod
+def getAllEdges():
+    conn = DBConnect.get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    result = []
+    query = """
+        SELECT DISTINCT
+            -- MODIFICARE: ID PRIMO NODO
+            n1.Id AS v1,
+            -- MODIFICARE: ID SECONDO NODO
+            n2.Id AS v2
+        FROM ...
+        -- MODIFICARE: JOIN TRA LE TABELLE
+        JOIN ...
+        -- MODIFICARE: CONDIZIONE DI COLLEGAMENTO
+        WHERE ...
+        -- MODIFICARE SE NECESSARIO:
+        -- AND n1.Id < n2.Id
+    """
+
+    cursor.execute(query)
+    for row in cursor:
+        result.append(row)
+
+    cursor.close()
+    conn.close()
+    return result
+
+2)MODEL — Struttura comune per recuperare le coppie
+# Recupero le coppie dal DAO
+edges = DAO.getAllEdges()
+
+for edge in edges:
+
+    # NON MODIFICARE
+    id1 = edge["v1"]
+    id2 = edge["v2"]
+
+    # Controllo che entrambi i nodi esistano
+    if id1 not in self._idMapAO or id2 not in self._idMapAO:
+        continue
+
+    # Recupero gli oggetti dalla mappa
+    u = self._idMapAO[id1]
+    v = self._idMapAO[id2]
+
+    # Evito autoarchi
+    if u == v:
+        continue
+
+    # QUI INSERISCO IL TIPO DI ARCO
+
+3) MODEL — Grafo NON orientato e NON pesato
+self._graph = nx.Graph()
+# Dopo aver recuperato u e v, NON MODIFICARE
+self._graph.add_edge(u, v)
+
+4) MODEL — Grafo NON orientato e PESATO
+# Dopo aver recuperato u e v
+# MODIFICARE: IL PESO DIPENDE DALLA TRACCIA
+3 METODI PER CALCOLARE PESO:
+1) DIPENDE DAL DAO: peso = edge["peso"]
+!!I n questo caso, la query SQL deve restituire una colonna chiamata peso:
+--> SELECT
+    n1.Id AS v1,
+    n2.Id AS v2,
+    COUNT(*) AS peso
+FROM ...
+GROUP BY n1.Id, n2.Id
+
+2)attributi e operazione: peso = u.Fatturato + v.Fatturato
+3)Differenza tra valori:  peso = abs(u.Valore - v.Valore)
+# NON MODIFICARE
+self._graph.add_edge(u, v, weight=peso)
+
+5)MODEL — Grafo ORIENTATO e PESATO
+self._graph = nx.DiGraph()
+# Dopo aver recuperato u e v
+# 1. MODIFICARE: CALCOLO DEL PESO
+peso = u.Fatturato + v.Fatturato
+# 2. MODIFICARE: ATTRIBUTO CHE STABILISCE LA DIREZIONE
+if u.Fatturato > v.Fatturato:
+    # Arco da u verso v
+    self._graph.add_edge(u, v, weight=peso)
+
+elif v.Fatturato > u.Fatturato:
+    # Arco da v verso u
+    self._graph.add_edge(v, u, weight=peso)
+
+else:
+    # 3. MODIFICARE: GESTIONE DELLA PARITÀ
+    # Aggiungere entrambi SOLO se richiesto
+    self._graph.add_edge(u, v, weight=peso)
+    self._graph.add_edge(v, u, weight=peso)
+
+7)MODEL — Grafo ORIENTATO e NON pesato
+self._graph = nx.DiGraph()
+Dopo aver recuperato u e v:
+# MODIFICARE: ATTRIBUTO DI CONFRONTO
+if u.Valore > v.Valore:
+    self._graph.add_edge(u, v)
+
+elif v.Valore > u.Valore:
+    self._graph.add_edge(v, u)
+
+else:
+    # SOLO SE RICHIESTO DALLA TRACCIA
+    self._graph.add_edge(u, v)
+    self._graph.add_edge(v, u)
+
+#ESEMPIO CON DATE: se la direzione è dal più vecchio al più recente, sostituisci il confronto con:
+if u.Data < v.Data:
+    self._graph.add_edge(u, v)
+
+elif v.Data < u.Data:
+    self._graph.add_edge(v, u)
+

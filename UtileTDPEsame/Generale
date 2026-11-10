@@ -1,0 +1,127 @@
+FORMULARIO GENERALE — TECNICHE DI PROGRAMMAZIONE
+
+
+1. SCEGLIERE IL GRAFO
+--------------------
+import networkx as nx
+self._graph = nx.Graph()       # non orientato
+self._graph = nx.DiGraph()     # orientato
+# Un grafo pesato usa add_edge(u, v, weight=peso) con Graph o DiGraph.
+# MultiGraph / MultiDiGraph solo se sono ammessi archi paralleli.
+
+2. COMANDI NETWORKX ESSENZIALI
+------------------------------
+G = self._graph
+G.clear()
+G.add_nodes_from(nodi)
+G.add_edge(u, v)                         # arco non pesato
+G.add_edge(u, v, weight=peso)            # arco pesato
+G.number_of_nodes()                      # numero nodi
+G.number_of_edges()                      # numero archi
+list(G.nodes)                            # nodi
+list(G.edges(data=True))                 # (u, v, dizionario_attributi)
+list(G.neighbors(u))                     # vicini; per DiGraph sono i successori
+list(G.successors(u))                    # solo DiGraph
+list(G.predecessors(u))                  # solo DiGraph
+G.has_edge(u, v)                         # esiste arco?
+G[u][v]['weight']                        # peso di arco esistente
+G.degree(u)                              # grado
+G.degree(u, weight='weight')             # somma pesi incidenti (Graph)
+G.in_degree(u)                           # solo DiGraph
+G.out_degree(u)                          # solo DiGraph
+G.out_degree(u, weight='weight')         # somma pesi uscenti (DiGraph)
+G.in_degree(u, weight='weight')          # somma pesi entranti (DiGraph)
+
+3. COPPIE E INSIEMI (UTILI PER GLI ARCHI)
+-----------------------------------------
+from itertools import combinations
+for a, b in combinations(nodi, 2):      # coppie distinte, senza ripetizioni
+    comuni = a.Playlists & b.Playlists  # intersezione di insiemi
+    if comuni:
+        G.add_edge(a, b, weight=len(comuni))
+
+# Equivalente a combinations(nodi, 2):
+for i in range(len(nodi)):
+    for j in range(i + 1, len(nodi)):
+        a, b = nodi[i], nodi[j]
+
+# Se il peso è il numero di gruppi condivisi, usare set evita doppioni.
+# Se la consegna impone una direzione, valutare l'ordine dei nodi e usare DiGraph.
+
+4. MASSIMI, ORDINAMENTI, TOP-N
+-----------------------------
+# Nodo con grado massimo (solo se il grafo non è vuoto):
+nodo, grado = max(G.degree(), key=lambda x: x[1])
+
+# Nodo con somma pesi massima (Graph; solo se non vuoto):
+nodo, somma = max(G.degree(weight='weight'), key=lambda x: x[1])
+
+# Top 5 archi per peso decrescente:
+top5 = sorted(G.edges(data=True),
+              key=lambda e: e[2]['weight'], reverse=True)[:5]
+
+# Top 10 archi per peso decrescente e nomi crescenti (Graph non orientato):
+top10 = sorted(
+    G.edges(data=True),
+    key=lambda e: (-e[2]['weight'],
+                   min(e[0].Name, e[1].Name),
+                   max(e[0].Name, e[1].Name))
+)[:10]
+
+# In un DiGraph, se conta il verso, NON riordinare gli estremi con min/max.
+# Prima del max() controllare che ci siano elementi, altrimenti ValueError.
+
+5. COMPONENTI CONNESSE E CAMMINI
+--------------------------------
+# Graph (non orientato):
+componenti = list(nx.connected_components(G))
+numero_componenti = nx.number_connected_components(G)
+maggiore = max(componenti, key=len) if componenti else set()
+
+# DiGraph (orientato):
+componenti_deboli = list(nx.weakly_connected_components(G))
+componenti_forti = list(nx.strongly_connected_components(G))
+
+# Cammini: usare quando la consegna NON richiede un backtracking personalizzato.
+cammino = nx.shortest_path(G, source, target)                   # numero minimo di archi
+cammino_pesato = nx.dijkstra_path(G, source, target, weight='weight')
+esiste = nx.has_path(G, source, target)
+# Attenzione: shortest_path può sollevare eccezioni se non esiste un cammino.
+
+6. MAPPE ID -> OGGETTO
+---------------------
+# Dopo aver ottenuto i nodi dal DAO:
+self._nodes = DAO.getAllObjects()
+self._idMap = {obj.ID: obj for obj in self._nodes}
+self._graph.add_nodes_from(self._nodes)
+# Da una query DAO che restituisce ID:
+u = self._idMap[row['ID1']]
+v = self._idMap[row['ID2']]
+self._graph.add_edge(u, v, weight=row['peso'])
+# ID, ID1, ID2, peso sono segnaposto: adattarli ai nomi reali.
+
+7. CONTROLLI PRIMA DI CONSEGNARE
+--------------------------------
+[ ] Ho scelto Graph o DiGraph secondo il testo?
+[ ] I nodi rispettano i filtri della consegna?
+[ ] Gli archi collegano esattamente le coppie richieste?
+[ ] I pesi non contano duplicati indesiderati?
+[ ] Gli ordinamenti gestiscono le parità richieste?
+[ ] Le funzioni per DiGraph sono usate solo su DiGraph?
+[ ] I nomi di attributi/metodi corrispondono a DAO, Model e dataclass?
+[ ] Il grafo è costruito prima di usare nodi, archi o dropdown?
+
+8. ERRORI DA NON COPIARE DALLO SCHEMA ORIGINALE
+----------------------------------------------
+- Non alternare self._grafo e self._graph.
+- Non definire più metodi _ricorsione con firme diverse nella stessa classe.
+- Non usare random.randint(0, len(lista)): può produrre indice fuori range.
+  Usare random.choice(lista) se non vuota, oppure random.randrange(len(lista)).
+- Un vincolo 'età decrescente' richiede un confronto coerente con la definizione
+  di eta(): se eta() restituisce l'età, nuovo.eta() < corrente.eta().
+- Non confondere massimizzazione del numero di nodi, del numero di archi,
+  della somma dei pesi e della somma degli attributi dei nodi.
+- Nelle ricorsioni, dopo append() serve pop() (e per i set add()/remove()).
+
+FONTE: selezione e riordino dello schema condiviso in chat, con correzioni
+tecniche esplicitate. I casi specifici vanno nei file NODI, ARCHI, RICORSIONI.

@@ -1,0 +1,344 @@
+FORMULARIO CHINOOK — TECNICHE DI PROGRAMMAZIONE
+
+======================================================================
+0. MAPPA DATABASE: JOIN CHE SI RIPETONO
+======================================================================
+Artist(ArtistId) -> Album(ArtistId) -> Track(AlbumId)
+Track(GenreId) -> Genre(GenreId)
+Track(TrackId) -> PlaylistTrack(TrackId) -> Playlist(PlaylistId)
+Customer(CustomerId) -> Invoice(CustomerId) -> InvoiceLine(InvoiceId)
+InvoiceLine(TrackId) -> Track(TrackId) -> Album -> Artist
+
+ATTENZIONE: in Chinook standard la tabella delle righe si chiama InvoiceLine;
+nel codice SQL controllare maiuscole e nomi effettivi delle tabelle.
+
+QUERY 1: ARTISTI CON ALMENO UN BRANO
+
+SELECT DISTINCT ar.ArtistId, ar.Name
+FROM Artist ar
+JOIN Album al ON al.ArtistId = ar.ArtistId
+JOIN Track t ON t.AlbumId = al.AlbumId;
+
+QUERY 2: ALBUM CON ALMENO UN BRANO
+SELECT DISTINCT al.AlbumId, al.Title, al.ArtistId
+FROM Album al JOIN Track t ON t.AlbumId = al.AlbumId;
+
+QUERY 3: PAESI PER DROPDOWN (GIUGNO A)
+SELECT DISTINCT Country FROM Customer
+WHERE Country IS NOT NULL ORDER BY Country;
+
+QUERY 4: GENERI PER DROPDOWN (SIMULAZIONE 11)
+SELECT GenreId, Name FROM Genre ORDER BY Name;
+
+QUERY 5: ARTISTI CON BRANI DEL GENERE SELEZIONATO (SIM. 11)
+SELECT DISTINCT ar.ArtistId, ar.Name
+FROM Artist ar
+JOIN Album al ON al.ArtistId = ar.ArtistId
+JOIN Track t ON t.AlbumId = al.AlbumId
+WHERE t.GenreId = %s;
+
+QUERY 6: CLIENTI DI UN PAESE CON ALMENO UNA FATTURA (GIUGNO A)
+SELECT DISTINCT c.CustomerId, c.FirstName, c.LastName, c.Country
+FROM Customer c JOIN Invoice i ON i.CustomerId = c.CustomerId
+WHERE c.Country = %s;
+
+QUERY 7: FATTURATO PER CLIENTE (GIUGNO A)
+SELECT c.CustomerId, COALESCE(SUM(i.Total), 0) AS fatturato
+FROM Customer c LEFT JOIN Invoice i ON i.CustomerId = c.CustomerId
+GROUP BY c.CustomerId;
+
+QUERY 8: GENERI DISTINTI DI OGNI ALBUM (GIUGNO B)
+SELECT DISTINCT t.AlbumId, t.GenreId
+FROM Track t WHERE t.AlbumId IS NOT NULL;
+
+QUERY 9: PLAYLIST DISTINTE DI OGNI ARTISTA (GIUGNO C)
+SELECT DISTINCT al.ArtistId, pt.PlaylistId
+FROM Album al
+JOIN Track t ON t.AlbumId = al.AlbumId
+JOIN PlaylistTrack pt ON pt.TrackId = t.TrackId;
+
+QUERY 10: NUMERO DI BRANI PER ARTISTA (GIUGNO C)
+SELECT al.ArtistId, COUNT(t.TrackId) AS n_brani
+FROM Album al JOIN Track t ON t.AlbumId = al.AlbumId
+GROUP BY al.ArtistId;
+
+QUERY 11: NUMERO DI BRANI PER ALBUM (GIUGNO B)
+SELECT t.AlbumId, COUNT(*) AS n_brani
+FROM Track t GROUP BY t.AlbumId;
+
+QUERY 12: POPOLARITA' PER ARTISTA (SIM. 11)
+-- La traccia definisce popolarità come somma dei brani acquistati.
+-- Quantity conteggia le unità vendute, non le sole righe.
+SELECT al.ArtistId, COALESCE(SUM(il.Quantity), 0) AS popolarita
+FROM Album al
+JOIN Track t ON t.AlbumId = al.AlbumId
+LEFT JOIN InvoiceLine il ON il.TrackId = t.TrackId
+GROUP BY al.ArtistId;
+
+QUERY 13: CLIENTE - ARTISTA ACQUISTATO (GIUGNO A)
+SELECT DISTINCT i.CustomerId, al.ArtistId
+FROM Invoice i
+JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId
+JOIN Track t ON t.TrackId = il.TrackId
+JOIN Album al ON al.AlbumId = t.AlbumId;
+
+QUERY 14: ARTISTA - CLIENTE ACQUIRENTE (SIM. 11)
+SELECT DISTINCT al.ArtistId, i.CustomerId
+FROM Album al
+JOIN Track t ON t.AlbumId = al.AlbumId
+JOIN InvoiceLine il ON il.TrackId = t.TrackId
+JOIN Invoice i ON i.InvoiceId = il.InvoiceId;
+
+======================================================================
+1. QUATTRO TRACCE: RICONOSCIMENTO RAPIDO
+======================================================================
+SIM. 11 (MAGGIO): nodi ARTISTI del GENERE scelto; DiGraph PESATO.
+  Arco se CLIENTE acquirente in comune; direzione per POPOLARITA';
+  peso = somma popolarità. Info: INFLUENZA e TOP 5.
+  Ricorsione: CAMMINO SEMPLICE PIU' LUNGO, pesi archi STRETTAMENTE CRESCENTI.
+
+GIUGNO A: nodi CLIENTI del PAESE scelto, con fatture; DiGraph PESATO.
+  Arco se ARTISTA acquistato in comune; direzione per FATTURATO;
+  peso = somma fatturati. Info: INFLUENZA e TOP 5.
+  Ricorsione: CAMMINO SEMPLICE PIU' LUNGO, fatturati NON CRESCENTI (<=).
+
+GIUGNO B: nodi ALBUM con brani; Graph NON PESATO.
+  Arco se GENERE in comune. Info: NUMERO COMPONENTI, COMPONENTE MASSIMA,
+  album ordinati per titolo e rispettivi conteggi brani.
+  Ricorsione: ESATTAMENTE N album da COMPONENTI DIVERSE,
+  album iniziale fissato; massimizza SOMMA BRANI.
+
+GIUGNO C: nodi ARTISTI con brani; Graph PESATO.
+  Arco se PLAYLIST in comune; peso = numero PLAYLIST DISTINTE comuni.
+  Info: GRADO MASSIMO, SOMMA PESI MASSIMA, TOP 10 con spareggio alfabetico.
+  Ricorsione: ESATTAMENTE N artisti; ogni aggiunto adiacente ad almeno uno
+  già scelto; vietato avere nel gruppo una coppia con arco peso 1;
+  massimizza SOMMA BRANI.
+
+======================================================================
+2. MODEL — COSTRUZIONE ARCHI: TRE SCHEMI RICORRENTI
+======================================================================
+# A) RELAZIONE IN COMUNE: usare set di ID (B, C, A, sim.11)
+# DAO deve restituire coppie (id_nodo, id_relazione).
+# Mappa: relazioni[id_nodo] = {id1, id2, ...}
+from collections import defaultdict
+relazioni = defaultdict(set)
+for id_nodo, id_relazione in DAO.getPairs():
+    relazioni[id_nodo].add(id_relazione)
+
+# B) GRAPH NON ORIENTATO, arco se intersezione NON VUOTA (GIUGNO B)
+for i in range(len(nodes)):
+    for j in range(i + 1, len(nodes)):
+        a, b = nodes[i], nodes[j]
+        comuni = relazioni[a.AlbumId] & relazioni[b.AlbumId]
+        if comuni:
+            self._graph.add_edge(a, b)
+
+# C) GRAPH NON ORIENTATO PESATO: peso = cardinalità intersezione (GIUGNO C)
+for i in range(len(nodes)):
+    for j in range(i + 1, len(nodes)):
+        a, b = nodes[i], nodes[j]
+        comuni = relazioni[a.ArtistId] & relazioni[b.ArtistId]
+        if comuni:
+            self._graph.add_edge(a, b, weight=len(comuni))
+
+# D) DIGRAPH PESATO: confronto attributo e doppio arco in caso di parità
+# (GIUGNO A: valore=fatturato; SIM.11: valore=popolarita)
+for i in range(len(nodes)):
+    for j in range(i + 1, len(nodes)):
+        a, b = nodes[i], nodes[j]
+        if not (relazioni[ID(a)] & relazioni[ID(b)]):
+            continue
+        va, vb = VALORE(a), VALORE(b)  # ADATTARE
+        peso = va + vb
+        if va > vb:
+            self._graph.add_edge(a, b, weight=peso)
+        elif vb > va:
+            self._graph.add_edge(b, a, weight=peso)
+        else:
+            self._graph.add_edge(a, b, weight=peso)
+            self._graph.add_edge(b, a, weight=peso)
+# ID e VALORE sono segnaposto, NON funzioni già esistenti.
+# A: ID = CustomerId; VALORE = fatturato
+# Sim.11: ID = ArtistId; VALORE = popolarita
+# IMPORTANTE: self._graph.add_nodes_from(nodes) PRIMA degli archi.
+
+======================================================================
+3. MODEL — METODI INFORMATIVI RIUTILIZZABILI
+======================================================================
+# GENERICI
+self._graph.number_of_nodes()
+self._graph.number_of_edges()
+
+# INFLUENZA (SIM. 11 e GIUGNO A): solo DiGraph pesato
+def getMostInfluential(self):
+    if not self._graph.nodes:
+        return None, None
+    return max(
+        ((v, self._graph.out_degree(v, weight='weight')
+              - self._graph.in_degree(v, weight='weight'))
+         for v in self._graph.nodes),
+        key=lambda item: item[1]
+    )
+
+# TOP 5 PESATI (SIM.11 e GIUGNO A)
+def getTop5Edges(self):
+    return sorted(self._graph.edges(data=True),
+                  key=lambda e: e[2]['weight'], reverse=True)[:5]
+
+# COMPONENTI (GIUGNO B): Graph NON ORIENTATO
+nx.number_connected_components(self._graph)
+components = list(nx.connected_components(self._graph))
+largest = max(components, key=len) if components else set()
+albums_sorted = sorted(largest, key=lambda a: a.Title)
+# Per numero brani: len(album.Tracks) oppure mappa conteggi caricata dal DAO.
+
+# GRADO / SOMMA PESI (GIUGNO C)
+max_degree = max(self._graph.degree, key=lambda x: x[1], default=(None, None))
+max_weighted_degree = max(
+    self._graph.degree(weight='weight'), key=lambda x: x[1], default=(None, None)
+)
+
+# TOP 10 (GIUGNO C): normalizzare gli estremi nel grafo non orientato
+def getTop10Edges(self):
+    edges = []
+    for u, v, data in self._graph.edges(data=True):
+        a, b = sorted((u, v), key=lambda n: (n.Name, n.ArtistId))
+        edges.append((a, b, data['weight']))
+    return sorted(edges, key=lambda e: (-e[2], e[0].Name, e[1].Name))[:10]
+# Controller: for a,b,peso in ... (NON for a,b,data).
+
+======================================================================
+4. CONTROLLER — DROPDOWN: COSA CAMBIA
+======================================================================
+SIM. 11: all'avvio caricare GENERE -> buildGraph(genre_id) -> caricare ARTISTI.
+GIUGNO A: all'avvio caricare PAESE -> buildGraph(country) -> caricare CLIENTI.
+GIUGNO B: buildGraph() -> caricare ALBUM -> leggere TextField N.
+GIUGNO C: buildGraph() -> caricare ARTISTI -> leggere TextField N.
+
+# ESEMPIO: riempire la tendina dei nodi DOPO buildGraph()
+def fillDDNodes(self):
+    self._view._ddNode.options.clear()    # ADATTARE NOME VIEW
+    for node in self._model.getNodes():   # ADATTARE METODO MODEL
+        self._view._ddNode.options.append(
+            ft.dropdown.Option(key=str(node.ID), text=node.LABEL)
+        )
+    self._view.update_page()
+
+# ESEMPIO: leggere il nodo scelto e convertirlo in oggetto Model
+raw_id = self._view._ddNode.value
+if raw_id is None:
+    # mostrare messaggio e return
+    return
+node = self._model.getNodeById(int(raw_id))  # usare la idMap del Model
+# MAI passare la stringa del Dropdown se la ricorsione si aspetta un oggetto.
+
+# N positivo da TextField (GIUGNO B/C)
+try:
+    n = int(self._view._txtN.value)
+    if n < 1:
+        raise ValueError
+except (ValueError, TypeError):
+    # mostrare errore e return
+    return
+
+# Nomi _ddNode, _txtN, ID, LABEL sono SEGNAPOSTO.
+# Guardare la View fornita per i nomi esatti (es. _ddArtist, _txt_result).
+# In alcuni progetti si usa _view._txt_result, in altri _view.txt_result.
+# Il dropdown iniziale va popolato PRIMA di premere Crea grafo.
+
+======================================================================
+5. MODEL — QUATTRO RICORSIONI PRONTE DA ADATTARE
+======================================================================
+# SIM. 11: cammino più lungo, pesi STRETTAMENTE CRESCENTI
+# Usare questi due metodi INSIEME, non mescolare _ricorsione di altre tracce.
+def sim11_getBestPath(self, source):
+    self._bestPath = [source]
+    self._sim11_dfs([source], None)
+    return self._bestPath
+
+def _sim11_dfs(self, partial, previous_weight):
+    if len(partial) > len(self._bestPath):
+        self._bestPath = partial.copy()
+    for _, nxt, data in self._graph.out_edges(partial[-1], data=True):
+        w = data['weight']
+        if nxt not in partial and (previous_weight is None or w > previous_weight):
+            partial.append(nxt)
+            self._sim11_dfs(partial, w)
+            partial.pop()
+
+# GIUGNO A: cammino più lungo, fatturati NON CRESCENTI (<=)
+def giugnoA_getBestPath(self, source):
+    self._bestPath = [source]
+    self._giugnoA_dfs([source])
+    return self._bestPath
+
+def _giugnoA_dfs(self, partial):
+    if len(partial) > len(self._bestPath):
+        self._bestPath = partial.copy()
+    current = partial[-1]
+    for nxt in self._graph.successors(current):
+        if nxt in partial or nxt.fatturato > current.fatturato:
+            continue
+        partial.append(nxt)
+        self._giugnoA_dfs(partial)
+        partial.pop()
+# ADATTARE .fatturato (attributo del Customer o mappa nel Model).
+
+# GIUGNO B: N album, componenti TUTTE DIVERSE, primo fissato,
+# massimo numero complessivo di brani.
+def giugnoB_getBestSelection(self, source, n):
+    if source not in self._graph or n < 1:
+        return [], None
+    comps = list(nx.connected_components(self._graph))
+    others = [c for c in comps if source not in c]
+    self._bestSelection = []
+    self._bestScore = float('-inf')
+    self._giugnoB_dfs(others, 0, [source], n, len(source.Tracks))
+    return (self._bestSelection, self._bestScore) if self._bestSelection else ([], None)
+
+def _giugnoB_dfs(self, comps, index, partial, n, score):
+    if len(partial) == n:
+        if score > self._bestScore:
+            self._bestScore, self._bestSelection = score, partial.copy()
+        return
+    if index == len(comps) or len(partial) + len(comps) - index < n:
+        return
+    self._giugnoB_dfs(comps, index + 1, partial, n, score)  # salto componente
+    for album in comps[index]:
+        partial.append(album)
+        self._giugnoB_dfs(comps, index + 1, partial, n, score + len(album.Tracks))
+        partial.pop()
+# ADATTARE .Tracks (lista di brani caricata dal DAO).
+
+# GIUGNO C: N artisti; ciascun nuovo nodo adiacente ad almeno uno scelto;
+# nessuna coppia del gruppo può essere collegata con peso 1.
+def giugnoC_getBestGroup(self, source, n):
+    if source not in self._graph or n < 1:
+        return [], None
+    self._bestGroup = []
+    self._bestScore = float('-inf')
+    self._giugnoC_dfs([source], n, len(source.Tracks))
+    return (self._bestGroup, self._bestScore) if self._bestGroup else ([], None)
+
+def _giugnoC_dfs(self, partial, n, score):
+    if len(partial) == n:
+        if score > self._bestScore:
+            self._bestScore, self._bestGroup = score, partial.copy()
+        return
+    candidates = set()
+    for u in partial:
+        candidates.update(self._graph.neighbors(u))
+    for v in candidates:
+        if v in partial:
+            continue
+        if any(self._graph.has_edge(v, u) and
+               self._graph[v][u]['weight'] == 1 for u in partial):
+            continue
+        partial.append(v)
+        self._giugnoC_dfs(partial, n, score + len(v.Tracks))
+        partial.pop()
+# ADATTARE .Tracks. La ricerca può ripetere gli stessi insiemi in ordini
+# diversi: corretta come schema, ma da ottimizzare per grafi grandi.
+
+

@@ -1,0 +1,6 @@
+[client]
+user=root
+host=127.0.0.1
+database=Chinook
+port=3306
+raise_on_warnings=True

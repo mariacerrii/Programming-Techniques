@@ -1,0 +1,9 @@
+# 1. Trova il processo che occupa la porta 3306
+sudo lsof -nP -iTCP:3306 -sTCP:LISTEN
+IMPORTANTE: il numero 529 è il PID del processo e può cambiare ogni volta.
+
+# 2. Ferma il MySQL esterno a XAMPP (sostituisci il PID)
+sudo kill -TERM 529
+
+# 3. Verifica che la porta sia libera
+sudo lsof -nP -iTCP:3306 -sTCP:LISTEN
